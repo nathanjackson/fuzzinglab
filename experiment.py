@@ -2,6 +2,7 @@ import sys
 
 import dumb
 import simple_guided
+import qlearning
 
 import matplotlib.pyplot as plt
 
@@ -69,9 +70,25 @@ if __name__ == "__main__":
 
     print("Simple Covergae Guided Fuzzer Execs to Crash: %d" % (simple_guided_fuzzer.execs,))
 
+    tracker.lifetime_coverage.clear()
+    tracker.last_coverage.clear()
+
+    qlearning_fuzzer = qlearning.QLearningGuidedFuzzer(tracker)
+    qlearning_cov = []
+
+    while 0 == qlearning_fuzzer.crashes:
+        qlearning_fuzzer.step()
+        qlearning_cov.append(len(tracker.lifetime_coverage))
+
+    print("Q-Learning Fuzzer Execs to Crash: %d" %(qlearning_fuzzer.iterations,))
+
     x = [i for i in range(dumb_fuzzer.execs)]
-    plt.plot(x, dumb_fuzzer_cov)
+    plt.plot(x, dumb_fuzzer_cov, c='blue')
 
     x = [i for i in range(simple_guided_fuzzer.execs)]
-    plt.plot(x, simple_guided_cov)
+    plt.plot(x, simple_guided_cov, c='green')
+
+    x = [i for i in range(qlearning_fuzzer.iterations)]
+    plt.plot(x, qlearning_cov, c='red')
+
     plt.show()
