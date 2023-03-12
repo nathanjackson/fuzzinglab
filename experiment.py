@@ -3,6 +3,7 @@ import sys
 import dumb
 import simple_guided
 import qlearning
+import qemu_afl
 
 import matplotlib.pyplot as plt
 
@@ -47,48 +48,45 @@ class CoverageTracker:
 
 
 if __name__ == "__main__":
-    tracker = CoverageTracker(instrumented_fuzzme)
-    dumb_fuzzer = dumb.DumbFuzzer(tracker)
+    qafl = qemu_afl.QemuAfl("./fuzzme @@")
+#    dumb_fuzzer = dumb.DumbFuzzer(qafl)
 
-    dumb_fuzzer_cov = []
+#    dumb_fuzzer_cov = []
 
-    while 0 == dumb_fuzzer.crashes:
-        dumb_fuzzer.step()
-        dumb_fuzzer_cov.append(len(tracker.lifetime_coverage))
+#    while 0 == dumb_fuzzer.crashes:
+#        dumb_fuzzer.step()
+#        dumb_fuzzer_cov.append(len(qafl.lifetime_coverage))
 
-    print("Dumb Fuzzer Execs to Crash: %d" % (dumb_fuzzer.execs, ))
+#    print("Dumb Fuzzer Execs to Crash: %d" % (dumb_fuzzer.execs, ))
 
-    tracker.lifetime_coverage.clear()
-    tracker.last_coverage.clear()
-
-    simple_guided_fuzzer = simple_guided.SimpleCoverageGuidedFuzzer(tracker)
+    simple_guided_fuzzer = simple_guided.SimpleCoverageGuidedFuzzer(qafl)
     simple_guided_cov = []
 
     while 0 == simple_guided_fuzzer.crashes:
         simple_guided_fuzzer.step()
-        simple_guided_cov.append(len(tracker.lifetime_coverage))
+        simple_guided_cov.append(len(qafl.lifetime_coverage))
 
     print("Simple Covergae Guided Fuzzer Execs to Crash: %d" % (simple_guided_fuzzer.execs,))
-
-    tracker.lifetime_coverage.clear()
-    tracker.last_coverage.clear()
-
-    qlearning_fuzzer = qlearning.QLearningGuidedFuzzer(tracker)
-    qlearning_cov = []
-
-    while 0 == qlearning_fuzzer.crashes:
-        qlearning_fuzzer.step()
-        qlearning_cov.append(len(tracker.lifetime_coverage))
-
-    print("Q-Learning Fuzzer Execs to Crash: %d" %(qlearning_fuzzer.iterations,))
-
-    x = [i for i in range(dumb_fuzzer.execs)]
-    plt.plot(x, dumb_fuzzer_cov, c='blue')
-
-    x = [i for i in range(simple_guided_fuzzer.execs)]
-    plt.plot(x, simple_guided_cov, c='green')
-
-    x = [i for i in range(qlearning_fuzzer.iterations)]
-    plt.plot(x, qlearning_cov, c='red')
-
-    plt.show()
+#
+#    tracker.lifetime_coverage.clear()
+#    tracker.last_coverage.clear()
+#
+#    qlearning_fuzzer = qlearning.QLearningGuidedFuzzer(tracker)
+#    qlearning_cov = []
+#
+#    while 0 == qlearning_fuzzer.crashes:
+#        qlearning_fuzzer.step()
+#        qlearning_cov.append(len(tracker.lifetime_coverage))
+#
+#    print("Q-Learning Fuzzer Execs to Crash: %d" %(qlearning_fuzzer.iterations,))
+#
+#    x = [i for i in range(dumb_fuzzer.execs)]
+#    plt.plot(x, dumb_fuzzer_cov, c='blue')
+#
+#    x = [i for i in range(simple_guided_fuzzer.execs)]
+#    plt.plot(x, simple_guided_cov, c='green')
+#
+#    x = [i for i in range(qlearning_fuzzer.iterations)]
+#    plt.plot(x, qlearning_cov, c='red')
+#
+#    plt.show()

@@ -11,7 +11,5 @@ class DumbFuzzer:
         test_length = random.randint(1, 10)
         test = random.randbytes(test_length)
 
-        try:
-            self.fn(test)
-        except AssertionError:
+        if self.fn(test):
             self.crashes += 1

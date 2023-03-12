@@ -33,9 +33,7 @@ class SimpleCoverageGuidedFuzzer:
         test = self.make_test()
 
         before_cov = self.tracker.lifetime_coverage.copy()
-        try:
-            self.tracker(test)
-        except AssertionError:
+        if self.tracker(test):
             self.crashes += 1
         after_cov = self.tracker.lifetime_coverage.copy()
 
