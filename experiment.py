@@ -20,7 +20,7 @@ def main():
 
     while 0 == simple_guided_fuzzer.crashes:
         if 0 < simple_guided_fuzzer.execs and 0 == simple_guided_fuzzer.execs % 10:
-            print(f"execs={simple_guided_fuzzer.execs} {len(simple_guided_fuzzer.test_suite)}")
+            print(f"execs={simple_guided_fuzzer.execs}, cs={len(simple_guided_fuzzer.test_suite)}")
         simple_guided_fuzzer.step()
 
     print("Simple Covergae Guided Fuzzer Execs to Crash: %d" % (simple_guided_fuzzer.execs,))
