@@ -25,7 +25,7 @@ class QemuAfl:
         self.lifetime_coverage = set()
 
     def exec(self, a):
-        args = ["./qemuafl/build/qemu-x86_64"]
+        args = ["./qemu/build/qemu-x86_64"]
         args += a
         self._shm.write(bytes([0 for _ in range(self._shm.size)]))
         completed = subprocess.run(args, env={

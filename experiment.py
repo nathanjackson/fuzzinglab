@@ -63,6 +63,8 @@ if __name__ == "__main__":
     simple_guided_cov = []
 
     while 0 == simple_guided_fuzzer.crashes:
+        if 0 < simple_guided_fuzzer.execs and 0 == simple_guided_fuzzer.execs % 10:
+            print(f"{simple_guided_fuzzer.execs} {len(simple_guided_fuzzer.test_suite)}")
         simple_guided_fuzzer.step()
         simple_guided_cov.append(len(qafl.lifetime_coverage))
 
@@ -83,10 +85,10 @@ if __name__ == "__main__":
 #    x = [i for i in range(dumb_fuzzer.execs)]
 #    plt.plot(x, dumb_fuzzer_cov, c='blue')
 #
-#    x = [i for i in range(simple_guided_fuzzer.execs)]
-#    plt.plot(x, simple_guided_cov, c='green')
+    x = [i for i in range(simple_guided_fuzzer.execs)]
+    plt.plot(x, simple_guided_cov, c='green')
 #
 #    x = [i for i in range(qlearning_fuzzer.iterations)]
 #    plt.plot(x, qlearning_cov, c='red')
 #
-#    plt.show()
+    plt.show()
