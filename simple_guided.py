@@ -2,11 +2,12 @@ import random
 
 
 class SimpleCoverageGuidedFuzzer:
-    def __init__(self, tracker):
+    def __init__(self, target):
         self.execs = 0
         self.crashes = 0
-        self.tracker = tracker
+        self.target = target
         self.test_suite = []
+        self._lifetime_coverage = set()
 
     def make_test(self):
         if 0 == len(self.test_suite):
@@ -31,11 +32,13 @@ class SimpleCoverageGuidedFuzzer:
         self.execs += 1
 
         test = self.make_test()
+        #test = b"bug"
 
-        before_cov = self.tracker.lifetime_coverage.copy()
-        if self.tracker(test):
+        test_result = self.target(test)
+
+        if test_result.exit_code > 128:
             self.crashes += 1
-        after_cov = self.tracker.lifetime_coverage.copy()
 
-        if 0 < len(after_cov - before_cov):
-            self.test_suite.append(test)
+        if not test_result.coverage.issubset(self._lifetime_coverage):
+            self.test_suite.append(test_result.test)
+            self._lifetime_coverage.update(test_result.coverage)

@@ -1,72 +1,27 @@
-import sys
+#!/usr/bin/env python
+import os
+#import sys
 
-import dumb
+#import dumb
 import simple_guided
-import qlearning
+#import qlearning
 import qemu_afl
 
-import matplotlib.pyplot as plt
+#import matplotlib.pyplot as plt
 
 
-def fuzzme(test):
-    if 3 > len(test):
-        return
-    if test[0] == b'b'[0]:
-        if test[1] == b'u'[0]:
-            if test[2] == b'g'[0]:
-                assert False
 
+def main():
+    #os.sched_setaffinity(0, {0})
 
-def instrumented_fuzzme(tracker, test):
-    if 3 > len(test):
-        tracker.add_coverage()
-        return
-    if test[0] == b'b'[0]:
-        tracker.add_coverage()
-        if test[1] == b'u'[0]:
-            tracker.add_coverage()
-            if test[2] == b'g'[0]:
-                tracker.add_coverage()
-                assert False
-    tracker.add_coverage()
+    fuzzme = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 -E LD_BIND_NOW=1 ./fuzzme /tmp/payload")
 
-
-class CoverageTracker:
-    def __init__(self, fn):
-        self.fn = fn
-        self.lifetime_coverage = set()
-        self.last_coverage = set()
-
-    def add_coverage(self):
-        location = sys._getframe().f_back.f_lineno
-        self.last_coverage.add(location)
-
-    def __call__(self, test):
-        self.last_coverage.clear()
-        self.fn(self, test)
-        self.lifetime_coverage.update(self.last_coverage)
-
-
-if __name__ == "__main__":
-    qafl = qemu_afl.QemuAfl("./fuzzme @@")
-#    dumb_fuzzer = dumb.DumbFuzzer(qafl)
-
-#    dumb_fuzzer_cov = []
-
-#    while 0 == dumb_fuzzer.crashes:
-#        dumb_fuzzer.step()
-#        dumb_fuzzer_cov.append(len(qafl.lifetime_coverage))
-
-#    print("Dumb Fuzzer Execs to Crash: %d" % (dumb_fuzzer.execs, ))
-
-    simple_guided_fuzzer = simple_guided.SimpleCoverageGuidedFuzzer(qafl)
-    simple_guided_cov = []
+    simple_guided_fuzzer = simple_guided.SimpleCoverageGuidedFuzzer(fuzzme)
 
     while 0 == simple_guided_fuzzer.crashes:
         if 0 < simple_guided_fuzzer.execs and 0 == simple_guided_fuzzer.execs % 10:
-            print(f"{simple_guided_fuzzer.execs} {len(simple_guided_fuzzer.test_suite)}")
+            print(f"execs={simple_guided_fuzzer.execs} {len(simple_guided_fuzzer.test_suite)}")
         simple_guided_fuzzer.step()
-        simple_guided_cov.append(len(qafl.lifetime_coverage))
 
     print("Simple Covergae Guided Fuzzer Execs to Crash: %d" % (simple_guided_fuzzer.execs,))
 #
@@ -85,10 +40,13 @@ if __name__ == "__main__":
 #    x = [i for i in range(dumb_fuzzer.execs)]
 #    plt.plot(x, dumb_fuzzer_cov, c='blue')
 #
-    x = [i for i in range(simple_guided_fuzzer.execs)]
-    plt.plot(x, simple_guided_cov, c='green')
+    #x = [i for i in range(simple_guided_fuzzer.execs)]
+    #plt.plot(x, simple_guided_cov, c='green')
 #
 #    x = [i for i in range(qlearning_fuzzer.iterations)]
 #    plt.plot(x, qlearning_cov, c='red')
 #
-    plt.show()
+    #plt.show()
+
+if __name__ == "__main__":
+    main()
