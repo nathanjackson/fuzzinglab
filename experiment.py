@@ -2,7 +2,7 @@
 import os
 #import sys
 
-#import dumb
+import dumb
 import simple_guided
 #import qlearning
 import qemu_afl
@@ -16,14 +16,20 @@ def main():
 
     fuzzme = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 -E LD_BIND_NOW=1 ./fuzzme /tmp/payload")
 
-    simple_guided_fuzzer = simple_guided.SimpleCoverageGuidedFuzzer(fuzzme)
+    dumb_fuzzer = dumb.DumbFuzzer(fuzzme)
+    while 0 == dumb_fuzzer.crashes:
+        if 0 < dumb_fuzzer.execs and 0 == dumb_fuzzer.execs % 10:
+            print(f"execs={dumb_fuzzer.execs}")
+        dumb_fuzzer.step()
 
-    while 0 == simple_guided_fuzzer.crashes:
-        if 0 < simple_guided_fuzzer.execs and 0 == simple_guided_fuzzer.execs % 10:
-            print(f"execs={simple_guided_fuzzer.execs}, cs={len(simple_guided_fuzzer.test_suite)}")
-        simple_guided_fuzzer.step()
+#    simple_guided_fuzzer = simple_guided.SimpleCoverageGuidedFuzzer(fuzzme)
 
-    print("Simple Covergae Guided Fuzzer Execs to Crash: %d" % (simple_guided_fuzzer.execs,))
+#    while 0 == simple_guided_fuzzer.crashes:
+#        if 0 < simple_guided_fuzzer.execs and 0 == simple_guided_fuzzer.execs % 10:
+#            print(f"execs={simple_guided_fuzzer.execs}, cs={len(simple_guided_fuzzer.test_suite)}")
+#        simple_guided_fuzzer.step()
+
+#    print("Simple Covergae Guided Fuzzer Execs to Crash: %d" % (simple_guided_fuzzer.execs,))
 #
 #    tracker.lifetime_coverage.clear()
 #    tracker.last_coverage.clear()
