@@ -6,6 +6,7 @@ import dumb
 import simple_guided
 #import qlearning
 import qemu_afl
+import afl
 
 #import matplotlib.pyplot as plt
 
@@ -16,11 +17,16 @@ def main():
 
     fuzzme = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 -E LD_BIND_NOW=1 ./fuzzme /tmp/payload")
 
-    dumb_fuzzer = dumb.DumbFuzzer(fuzzme)
-    while 0 == dumb_fuzzer.crashes:
-        if 0 < dumb_fuzzer.execs and 0 == dumb_fuzzer.execs % 10:
-            print(f"execs={dumb_fuzzer.execs}")
-        dumb_fuzzer.step()
+    fuzzer = afl.AflFuzzer(fuzzme, [b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"])
+
+    while True:
+        fuzzer.step()
+
+#    dumb_fuzzer = dumb.DumbFuzzer(fuzzme)
+#    while 0 == dumb_fuzzer.crashes:
+#        if 0 < dumb_fuzzer.execs and 0 == dumb_fuzzer.execs % 10:
+#            print(f"execs={dumb_fuzzer.execs}")
+#        dumb_fuzzer.step()
 
 #    simple_guided_fuzzer = simple_guided.SimpleCoverageGuidedFuzzer(fuzzme)
 
