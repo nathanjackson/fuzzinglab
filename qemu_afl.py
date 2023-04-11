@@ -47,6 +47,7 @@ class AflForkServerTarget:
             args = command.split()
             os.execve(args[0], args, {
                 "__AFL_SHM_ID": str(self.shm.id),
+                "LD_BIND_NOW": "1"
             })
             raise Exception("Exec Failed")
         os.close(ctl_pipe[0])

@@ -16,8 +16,9 @@ def main():
     #os.sched_setaffinity(0, {0})
 
     fuzzme = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 -E LD_BIND_NOW=1 ./fuzzme /tmp/payload")
-
-    fuzzer = afl.AflFuzzer(fuzzme, [b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"])
+    #fuzzme = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 -cpu max -E LD_BIND_NOW=1 /home/nathan/src/buffer-overflow-dataset/dataset/wasm3 /tmp/payload")
+    
+    fuzzer = afl.AflFuzzer(fuzzme, [b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"])
 
     while True:
         fuzzer.step()
