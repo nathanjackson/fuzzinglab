@@ -11,7 +11,7 @@ class BitFlipMutator:
         # determine how many bytes we'll need to mutate
         n_bytes = (8 * math.ceil(self.n / 8.)) // 8
         # pick a random index
-        byte_index = random.randrange(len(test) - n_bytes + 1)
+        byte_index = random.randrange(max(1, len(test) - n_bytes + 1))
         # get value
         value = int.from_bytes(test[byte_index:byte_index + n_bytes], signed=False, byteorder="little")
         # pick a random shift
@@ -27,15 +27,46 @@ class BitFlipMutator:
 
 
 class AddMutator:
-    def __init__(self, min, max):
+    def __init__(self, field_size, byteorder, min, max):
+        self.field_size = field_size
+        self.byteorder = byteorder
         self.min = min
         self.max = max
 
     def __call__(self, test):
         delta = random.randint(self.min, self.max)
         index = random.randrange(len(test))
-        test[index] = (test[index] + delta) % 255
 
+        bytes_len = self.field_size // 8
+        value = int.from_bytes(test[index:index+bytes_len], signed=False, byteorder=self.byteorder)
+
+        value = (value + delta) % (2 ** self.field_size - 1)
+        new_bytes = value.to_bytes(bytes_len, signed=False, byteorder=self.byteorder)
+
+        test[index:index+bytes_len] = new_bytes
+
+class InsertMutator:
+    def __call__(self, test: bytearray):
+        size = random.randrange(max(len(test) // 4, 1))
+        fixed = random.choice([True, False])
+        if fixed:
+            b = random.randint(0, 255)
+            bs = bytes([b] * size)
+        else:
+            bs = random.randbytes(size)
+        index = random.randrange(len(test))
+        for b in bs:
+            test.insert(index, b)
+            index = min(index + 1, len(bs) - 1)
+
+class DeleteMutator:
+    def __call__(self, test: bytearray):
+        index = random.randrange(len(test))
+        size = random.randrange( max(1, (len(test) - index) // 2))
+        new = test[:index+1] + test[index+size-1:]
+        if len(new) > 0:
+            test.clear()
+            test += new
 
 class HavocMutator:
     def __init__(self):
@@ -47,8 +78,18 @@ class HavocMutator:
             BitFlipMutator(16),
             BitFlipMutator(24),
             BitFlipMutator(32),
-            AddMutator(-35, 35)
+            AddMutator(8, "little", -35, 35),
+            AddMutator(16, "little", -35, 35),
+            AddMutator(24, "little", -35, 35),
+            AddMutator(32, "little", -35, 35),
+            AddMutator(8, "big", -35, 35),
+            AddMutator(16, "big", -35, 35),
+            AddMutator(24, "big", -35, 35),
+            AddMutator(32, "big", -35, 35),
         ]
+        self._mutators = self._mutators * 4
+        self._mutators.append(InsertMutator())
+        self._mutators.append(DeleteMutator())
 
     def __call__(self, test):
         n = 1 << 1 + random.randint(0, 7)
@@ -57,11 +98,12 @@ class HavocMutator:
             mutator(test)
 
 class QueueEntry:
-    def __init__(self, testcase, exec_us, cov_set, handicap):
+    def __init__(self, testcase, exec_us, cov_set, handicap, parent):
         self.testcase = testcase
         self.exec_us = exec_us
         self.cov_set = cov_set
         self.handicap = handicap
+        self.parent = parent
 
 
 class AflFuzzer:
@@ -131,6 +173,23 @@ class AflFuzzer:
             score *= 2
             qe.handicap -= 1
 
+        cqe = qe
+        depth = 0
+        while cqe != None:
+            cqe = cqe.parent
+            depth += 1
+
+        if 0 <= depth <= 3:
+            pass
+        elif 4 <= depth <= 7:
+            score *= 2
+        elif 8 <= depth <= 13:
+            score *= 3
+        elif 14 <= depth <= 25:
+            score *= 4
+        else:
+            score *= 5
+
         print("score=", score)
         return score
 
@@ -146,7 +205,7 @@ class AflFuzzer:
             havoc_div = 2
         score = self._compute_score(index)
         n = 256 * (score // havoc_div // 100)
-        return n
+        return max(n, 16)
 
     def step(self):
         self._execs += 1
@@ -154,7 +213,12 @@ class AflFuzzer:
         if self._new_testcases:
             self._total_cal_execs += 1
 
-            testcase = self._new_testcases[0]
+            if isinstance(self._new_testcases[0], QueueEntry):
+                qe = self._new_testcases[0]
+                testcase = qe.testcase
+            else:
+                testcase = self._new_testcases[0]
+                qe = None
             start_ns = time.monotonic_ns()
             test_result = self.target(testcase)
             end_ns = time.monotonic_ns()
@@ -175,7 +239,12 @@ class AflFuzzer:
             self.total_coverage.update(test_result.coverage)
             self._new_testcases = self._new_testcases[1:]
 
-            qe = QueueEntry(testcase, delta_us, test_result.coverage, self._cycles - 1)
+            if qe:
+                parent = qe.parent
+            else:
+                parent = None
+
+            qe = QueueEntry(testcase, delta_us, test_result.coverage, self._cycles - 1, parent)
             self.corpus.append(qe)
             self.corpus_ns.append(delta_ns)
 
@@ -198,11 +267,13 @@ class AflFuzzer:
             delta_us = (end_ns - start_ns) // 1000
             self._total_us += delta_us
             if test_result.exit_code > 128:
-                self._crashes += 1
+                self._crashes.append(test_result)
             else:
                 if not test_result.coverage.issubset(self.total_coverage):
                     # found a potential new testcase, add it to the new testcases list for calibration
-                    self._new_testcases.append(bytes(test_result.test))
+                    qe = QueueEntry(bytes(test_result.test), delta_us, test_result.coverage, self._cycles - 1, qe)
+                    self._new_testcases.append(qe)
+                    #self._new_testcases.append(bytes(test_result.test))
 
 
             self.current_testcase_n_tests -= 1
@@ -214,7 +285,14 @@ class AflFuzzer:
                 testcase_ns = self.corpus_ns[self.current_testcase_index]
                 self.current_testcase_n_tests = self._calc_havoc_tests(self.current_testcase_index)
 
+        assert self.current_testcase_n_tests >= 0
         if self._execs > 0 and 0 == self._execs % 10:
             print("execs=%d testcases=%d crashes=%d cycles=%d tests=%d" % (self._execs, len(self.corpus), len(self._crashes), self._cycles, self.current_testcase_n_tests))
-            print("testcase=%s" % (self.corpus[self.current_testcase_index].testcase))
+            qe = self.corpus[self.current_testcase_index]
+            cqe = qe
+            depth = 0
+            while cqe:
+                cqe = cqe.parent
+                depth += 1
+            print("testcase=%s depth=%d" % (qe.testcase, depth))
 
