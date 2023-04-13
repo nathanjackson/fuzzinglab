@@ -34,6 +34,11 @@ class AflForkServerTarget:
 
         fsrv_pid = os.fork()
         if not fsrv_pid:
+            # redir stdout and stderr to /dev/null
+            devnull = os.open("/dev/null", os.O_WRONLY)
+            os.dup2(devnull, 1)
+            os.dup2(devnull, 2)
+
             # setup control and status pipes
             os.dup2(ctl_pipe[0], forksrv_fd)
             os.dup2(st_pipe[1], forksrv_fd + 1)
