@@ -18,7 +18,8 @@ def main():
     fuzzme = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 -E LD_BIND_NOW=1 ./fuzzme /tmp/payload")
     #fuzzme = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 -cpu max -E LD_BIND_NOW=1 /home/nathan/src/buffer-overflow-dataset/dataset/wasm3 /tmp/payload")
     
-    fuzzer = afl.AflFuzzer(fuzzme, [b"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"])
+    fuzzer = afl.AflFuzzer(fuzzme, [b"AAAAAAAAAAAAAAAA"])
+    #fuzzer = afl.AflFuzzer(fuzzme, [b'\x00asm\x00\x00\x00\x00', b'\x00\x00\x00\x00\x00\x00\x00\x00'])
 
     while True:
         fuzzer.step()

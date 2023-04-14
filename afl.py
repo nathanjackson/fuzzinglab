@@ -129,6 +129,8 @@ class AflFuzzer:
         self._total_cal_us = 0
         self._total_cal_execs = 0
 
+        self._bitmap_hist = {}
+
 
     def _compute_score(self, index):
         avg_exec_us = self._total_cal_us / self._total_cal_execs
@@ -190,6 +192,18 @@ class AflFuzzer:
         else:
             score *= 5
 
+        hits_scaled = math.log2(self._bitmap_hist[hash(frozenset(qe.cov_set))])
+
+        factor = 1.0
+        if 0 <= hits_scaled <= 1:
+            factor = 4.0
+        elif 2 <= hits_scaled <= 3:
+            factor = 3.0
+        elif 4 == hits_scaled:
+            factor = 2.0
+
+        score *= (min(32., factor) / 1.)
+
         print("score=", score)
         return score
 
@@ -236,6 +250,10 @@ class AflFuzzer:
             self._total_cal_us += delta_us
             self._total_us += delta_us
 
+            cov_hash = hash(frozenset(test_result.coverage))
+            if cov_hash not in self._bitmap_hist:
+                self._bitmap_hist[cov_hash] = 0
+            self._bitmap_hist[cov_hash] += 1
             self.total_coverage.update(test_result.coverage)
             self._new_testcases = self._new_testcases[1:]
 
@@ -266,6 +284,10 @@ class AflFuzzer:
             end_ns = time.monotonic_ns()
             delta_us = (end_ns - start_ns) // 1000
             self._total_us += delta_us
+            cov_hash = hash(frozenset(test_result.coverage))
+            if cov_hash not in self._bitmap_hist:
+                self._bitmap_hist[cov_hash] = 0
+            self._bitmap_hist[cov_hash] += 1
             if test_result.exit_code > 128:
                 self._crashes.append(test_result)
             else:
@@ -295,4 +317,5 @@ class AflFuzzer:
                 cqe = cqe.parent
                 depth += 1
             print("testcase=%s depth=%d" % (qe.testcase, depth))
+            print(self._bitmap_hist)
 
