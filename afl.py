@@ -106,40 +106,13 @@ class QueueEntry:
         self.parent = parent
 
 
-class AflFuzzer:
-    def __init__(self, target, corpus):
-        self.target = target
-        self.current_testcase_index = 0
-        self.current_testcase_n_tests = 0
-        self.corpus = []
-        self.corpus_ns = []
+    def perf_score(self, memento):
+        avg_exec_us = memento.total_calibration_time_us / memento.total_calibration_execs
+        avg_cov = sum([len(x.cov_set) for x in memento.test_cases]) / len(memento.test_cases)
 
-        self.total_coverage = set()
-
-        self._new_testcases = corpus.copy()
-
-        self._execs = 0
-        self._crashes = []
-        self._cycles = 0
-
-        self.havoc_mutator = HavocMutator()
-
-        self._total_us = 0
-
-        self._total_cal_us = 0
-        self._total_cal_execs = 0
-
-        self._bitmap_hist = {}
-
-
-    def _compute_score(self, index):
-        avg_exec_us = self._total_cal_us / self._total_cal_execs
-        avg_cov = len(self.total_coverage) / len(self.corpus)
-        exec_us = self.corpus_ns[index] // 1000
-
-        qe = self.corpus[index]
         score = 100
 
+        exec_us = self.exec_us
         if exec_us * 0.1 > avg_exec_us:
             score = 10
         elif exec_us * 0.25 > avg_exec_us:
@@ -155,27 +128,28 @@ class AflFuzzer:
         elif exec_us * 2 < avg_exec_us:
             score = 150
 
-        if len(qe.cov_set) * 0.3 > avg_cov:
+        cov_set = self.cov_set
+        if len(cov_set) * 0.3 > avg_cov:
             score *= 3
-        elif len(qe.cov_set) * 0.5 > avg_cov:
+        elif len(cov_set) * 0.5 > avg_cov:
             score *= 2
-        elif len(qe.cov_set) * 0.75 > avg_cov:
+        elif len(cov_set) * 0.75 > avg_cov:
             score *= 1.5
-        elif len(qe.cov_set) * 3 < avg_cov:
+        elif len(cov_set) * 3 < avg_cov:
             score *= 0.25
-        elif len(qe.cov_set) * 2 < avg_cov:
+        elif len(cov_set) * 2 < avg_cov:
             score *= 0.5
-        elif len(qe.cov_set) * 1.5 < avg_cov:
+        elif len(cov_set) * 1.5 < avg_cov:
             score *= 0.75
 
-        if qe.handicap >= 4:
+        if self.handicap >= 4:
             score *= 4
-            qe.handicap -= 4
-        elif qe.handicap > 0:
+            self.handicap -= 4
+        elif self.handicap > 0:
             score *= 2
-            qe.handicap -= 1
+            self.handicap -= 1
 
-        cqe = qe
+        cqe = self
         depth = 0
         while cqe != None:
             cqe = cqe.parent
@@ -192,7 +166,7 @@ class AflFuzzer:
         else:
             score *= 5
 
-        hits_scaled = math.log2(self._bitmap_hist[hash(frozenset(qe.cov_set))])
+        hits_scaled = math.log2(memento.coverage_set_hits[hash(frozenset(cov_set))])
 
         factor = 1.0
         if 0 <= hits_scaled <= 1:
@@ -207,8 +181,88 @@ class AflFuzzer:
         print("score=", score)
         return score
 
-    def _calc_havoc_tests(self, index):
-        avg_us = self._total_us / self._execs
+
+class AflMemento:
+    def __init__(self):
+        self.pending_tests = []
+        self.test_cases = []
+
+        # Coverage Tracking
+        self.total_coverage = set()
+        self.coverage_set_hits = dict()
+
+        # Calibration data
+        self.total_calibration_time_us = 0
+        self.total_calibration_execs = 0
+
+        # Havoc data
+        self.cycle_iterator = None
+        self.current_test_case = None
+        self.remaining_test_count = 0
+
+        # Overall Metrics
+        self.total_us = 0
+        self.total_execs = 0
+        self.cycle_count = 0
+        self.crashes = []
+
+
+class CalibratingState:
+    def __init__(self, afl_fuzzer):
+        self._afl_fuzzer = afl_fuzzer
+        assert len(self._afl_fuzzer.memento.pending_tests) > 0
+        self._test_iterator = iter(self._afl_fuzzer.memento.pending_tests)
+        self._current_test_parent, self._current_test = next(self._test_iterator)
+        self._previous_cov = None
+
+    def name(self):
+        return "calibrating"
+
+    def internal_step(self):
+        test_result = self._afl_fuzzer.run_test(self._current_test)
+        time_us = test_result.time_ns // 1000
+        self._afl_fuzzer.memento.total_us += time_us
+        self._afl_fuzzer.memento.total_execs += 1
+        if not self._previous_cov:
+            self._previous_cov = test_result.coverage
+            return self
+
+        assert self._previous_cov == test_result.coverage
+
+        self._afl_fuzzer.memento.total_calibration_time_us += time_us
+        self._afl_fuzzer.memento.total_calibration_execs += 1
+
+        if not test_result.coverage.issubset(self._afl_fuzzer.memento.total_coverage):
+            self._afl_fuzzer.memento.total_coverage.update(test_result.coverage)
+            queue_entry = QueueEntry(self._current_test, time_us, test_result.coverage, self._afl_fuzzer.memento.cycle_count, self._current_test_parent)
+            self._afl_fuzzer.memento.test_cases.append(queue_entry)
+
+        cov_hash = hash(frozenset(test_result.coverage))
+        if cov_hash not in self._afl_fuzzer.memento.coverage_set_hits:
+            self._afl_fuzzer.memento.coverage_set_hits[cov_hash] = 0
+        self._afl_fuzzer.memento.coverage_set_hits[cov_hash] += 1
+
+        self._afl_fuzzer.memento.pending_tests.remove((self._current_test_parent, self._current_test))
+
+        self._previous_cov = None
+        try:
+            self._current_test_parent, self._current_test = next(self._test_iterator)
+        except StopIteration:
+            return HavocState(self._afl_fuzzer)
+
+        return self
+
+
+class HavocState:
+    def __init__(self, afl_fuzzer):
+        self._afl_fuzzer = afl_fuzzer
+        self._mutator = HavocMutator()
+
+    def name(self):
+        return "havoc"
+
+    def _calc_test_count(self, test_case):
+        avg_us = self._afl_fuzzer.memento.total_us / self._afl_fuzzer.memento.total_execs
         print("avg_us=", avg_us)
         havoc_div = 1
         if avg_us > 50000:
@@ -217,105 +271,63 @@ class AflFuzzer:
             havoc_div = 5
         elif avg_us > 10000:
             havoc_div = 2
-        score = self._compute_score(index)
-        n = 256 * (score // havoc_div // 100)
-        return max(n, 16)
+        perf_score = test_case.perf_score(self._afl_fuzzer.memento)
+        n = 256 * (perf_score // havoc_div // 100)
+        return max(int(n), 16)
+    def internal_step(self):
+        if not self._afl_fuzzer.memento.cycle_iterator:
+            self._afl_fuzzer.memento.cycle_iterator = iter(self._afl_fuzzer.memento.test_cases)
+            self._afl_fuzzer.memento.current_test_case = next(self._afl_fuzzer.memento.cycle_iterator)
+            self._afl_fuzzer.memento.remaining_test_count = self._calc_test_count(self._afl_fuzzer.memento.current_test_case)
+        elif 0 == self._afl_fuzzer.memento.remaining_test_count:
+            try:
+                self._afl_fuzzer.memento.current_test_case = next(self._afl_fuzzer.memento.cycle_iterator)
+            except StopIteration:
+                self._afl_fuzzer.memento.cycle_count += 1
+                self._afl_fuzzer.memento.cycle_iterator = iter(self._afl_fuzzer.memento.test_cases)
+                self._afl_fuzzer.memento.current_test_case = next(self._afl_fuzzer.memento.cycle_iterator)
+            self._afl_fuzzer.memento.remaining_test_count = self._calc_test_count(self._afl_fuzzer.memento.current_test_case)
+
+
+        test = bytearray(self._afl_fuzzer.memento.current_test_case.testcase)
+        self._mutator(test)
+        test_result = self._afl_fuzzer.run_test(test)
+
+        self._afl_fuzzer.memento.total_execs += 1
+        self._afl_fuzzer.memento.total_us += test_result.time_ns // 1000
+
+        cov_hash = hash(frozenset(test_result.coverage))
+        if cov_hash not in self._afl_fuzzer.memento.coverage_set_hits:
+            self._afl_fuzzer.memento.coverage_set_hits[cov_hash] = 0
+        self._afl_fuzzer.memento.coverage_set_hits[cov_hash] += 1
+
+        if test_result.exit_code > 128:
+            self._afl_fuzzer.memento.crashes.append(test)
+        elif not test_result.coverage.issubset(self._afl_fuzzer.memento.total_coverage):
+            self._afl_fuzzer.memento.pending_tests.append((self._afl_fuzzer.memento.current_test_case, test))
+
+        self._afl_fuzzer.memento.remaining_test_count -= 1
+
+        if 0 == self._afl_fuzzer.memento.remaining_test_count and 0 < len(self._afl_fuzzer.memento.pending_tests):
+            return CalibratingState(self._afl_fuzzer)
+        return self
+
+class AflFuzzer:
+    def __init__(self, target, starting_corpus):
+        self.target = target
+        self.memento = AflMemento()
+
+        self.memento.pending_tests += [(None, x) for x in starting_corpus]
+
+        self.state = CalibratingState(self)
+
+    def run_test(self, test):
+        return self.target(test)
 
     def step(self):
-        self._execs += 1
-
-        if self._new_testcases:
-            self._total_cal_execs += 1
-
-            if isinstance(self._new_testcases[0], QueueEntry):
-                qe = self._new_testcases[0]
-                testcase = qe.testcase
-            else:
-                testcase = self._new_testcases[0]
-                qe = None
-            start_ns = time.monotonic_ns()
-            test_result = self.target(testcase)
-            end_ns = time.monotonic_ns()
-            assert 128 > test_result.exit_code
-
-            # on the first exec, run twice to avoid JIT warmup penalty
-            if 1 == self._execs:
-                start_ns = time.monotonic_ns()
-                test_result = self.target(testcase)
-                end_ns = time.monotonic_ns()
-                assert 128 > test_result.exit_code
-
-            delta_ns = end_ns - start_ns
-            delta_us = (delta_ns // 1000)
-            self._total_cal_us += delta_us
-            self._total_us += delta_us
-
-            cov_hash = hash(frozenset(test_result.coverage))
-            if cov_hash not in self._bitmap_hist:
-                self._bitmap_hist[cov_hash] = 0
-            self._bitmap_hist[cov_hash] += 1
-            self.total_coverage.update(test_result.coverage)
-            self._new_testcases = self._new_testcases[1:]
-
-            if qe:
-                parent = qe.parent
-            else:
-                parent = None
-
-            qe = QueueEntry(testcase, delta_us, test_result.coverage, self._cycles - 1, parent)
-            self.corpus.append(qe)
-            self.corpus_ns.append(delta_ns)
-
-            if 0 == self.current_testcase_n_tests:
-                testcase_ns = self.corpus_ns[self.current_testcase_index]
-                self.current_testcase_n_tests = self._calc_havoc_tests(self.current_testcase_index)
-
-        else:
-            # get current testcase
-            qe = self.corpus[self.current_testcase_index]
-
-            # create a new test from the current testcase
-            test = bytearray(qe.testcase)
-            self.havoc_mutator(test)
-
-            # measure
-            start_ns = time.monotonic_ns()
-            test_result = self.target(test)
-            end_ns = time.monotonic_ns()
-            delta_us = (end_ns - start_ns) // 1000
-            self._total_us += delta_us
-            cov_hash = hash(frozenset(test_result.coverage))
-            if cov_hash not in self._bitmap_hist:
-                self._bitmap_hist[cov_hash] = 0
-            self._bitmap_hist[cov_hash] += 1
-            if test_result.exit_code > 128:
-                self._crashes.append(test_result)
-            else:
-                if not test_result.coverage.issubset(self.total_coverage):
-                    # found a potential new testcase, add it to the new testcases list for calibration
-                    qe = QueueEntry(bytes(test_result.test), delta_us, test_result.coverage, self._cycles - 1, qe)
-                    self._new_testcases.append(qe)
-                    #self._new_testcases.append(bytes(test_result.test))
-
-
-            self.current_testcase_n_tests -= 1
-            if 0 == self.current_testcase_n_tests:
-                self.current_testcase_index += 1
-                if self.current_testcase_index == len(self.corpus):
-                    self._cycles += 1
-                    self.current_testcase_index = 0
-                testcase_ns = self.corpus_ns[self.current_testcase_index]
-                self.current_testcase_n_tests = self._calc_havoc_tests(self.current_testcase_index)
-
-        assert self.current_testcase_n_tests >= 0
-        if self._execs > 0 and 0 == self._execs % 10:
-            print("execs=%d testcases=%d crashes=%d cycles=%d tests=%d" % (self._execs, len(self.corpus), len(self._crashes), self._cycles, self.current_testcase_n_tests))
-            qe = self.corpus[self.current_testcase_index]
-            cqe = qe
-            depth = 0
-            while cqe:
-                cqe = cqe.parent
-                depth += 1
-            print("testcase=%s depth=%d" % (qe.testcase, depth))
-            print(self._bitmap_hist)
+        if self.memento.total_execs > 0 and self.memento.total_execs % 10 == 0:
+            print("state=%s testcases=%d crashes=%d pending=%d cycles=%d tests=%d" % (self.state.name(), len(self.memento.test_cases), len(self.memento.crashes), len(self.memento.pending_tests), self.memento.cycle_count, self.memento.remaining_test_count))
+            print(self.memento.current_test_case.testcase)
+            print(self.memento.coverage_set_hits)
+        self.state = self.state.internal_step()
 

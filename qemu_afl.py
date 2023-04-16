@@ -1,13 +1,15 @@
 import os
+import time
 
 import sysv_ipc
 
 
 class TestResult:
-    def __init__(self, test, exit_code, coverage):
+    def __init__(self, test, exit_code, coverage, time_ns):
         self.test = test
         self.exit_code = exit_code
         self.coverage = coverage
+        self.time_ns = time_ns
 
 
 def bitmap_to_set(m):
@@ -70,16 +72,18 @@ class AflForkServerTarget:
 
         self.shm.write(bytes([0 for _ in range(self.shm.size)]))
 
+        start_ns = time.monotonic_ns()
         self._write_control_pipe(0x0)
         target_pid = self._read_status_pipe()
         target_status = self._read_status_pipe()
+        end_ns = time.monotonic_ns()
         if os.WIFEXITED(target_status):
             exit_code = os.waitstatus_to_exitcode(target_status)
         else:
             exit_code = target_status
 
         bitmap = self.shm.read()
-        return TestResult(test, exit_code, bitmap_to_set(bitmap))
+        return TestResult(test, exit_code, bitmap_to_set(bitmap), end_ns - start_ns)
 
     def _read_status_pipe(self):
         raw = os.read(self.fsrv_st_fd, 4)
