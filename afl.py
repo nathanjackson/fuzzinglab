@@ -230,8 +230,6 @@ class CalibratingState:
     def internal_step(self):
         test_result = self._afl_fuzzer.run_test(self._current_test)
         time_us = test_result.time_ns // 1000
-        self._afl_fuzzer.memento.total_us += time_us
-        self._afl_fuzzer.memento.total_execs += 1
         if not self._previous_cov:
             self._previous_cov = test_result.coverage
             return self
@@ -302,9 +300,6 @@ class HavocState:
         self._mutator(test)
         test_result = self._afl_fuzzer.run_test(test)
 
-        self._afl_fuzzer.memento.total_execs += 1
-        self._afl_fuzzer.memento.total_us += test_result.time_ns // 1000
-
         cov_hash = hash(frozenset(test_result.coverage))
         if cov_hash not in self._afl_fuzzer.memento.coverage_set_hits:
             self._afl_fuzzer.memento.coverage_set_hits[cov_hash] = 0
@@ -318,7 +313,8 @@ class HavocState:
         self._afl_fuzzer.memento.remaining_test_count -= 1
 
         if 0 == self._afl_fuzzer.memento.remaining_test_count and 0 < len(self._afl_fuzzer.memento.pending_tests):
-            return CalibratingState(self._afl_fuzzer)
+            #return CalibratingState(self._afl_fuzzer)
+            return CoroMinimizer(self._afl_fuzzer)
         return self
 
 class AflFuzzer:
@@ -331,12 +327,91 @@ class AflFuzzer:
         self.state = CalibratingState(self)
 
     def run_test(self, test):
-        return self.target(test)
+        result = self.target(test)
+        self.memento.total_us += result.time_ns // 1000
+        self.memento.total_execs += 1
+        return result
 
     def step(self):
         if self.memento.total_execs > 0 and self.memento.total_execs % 10 == 0:
             print("state=%s testcases=%d crashes=%d pending=%d cycles=%d tests=%d" % (self.state.name(), len(self.memento.test_cases), len(self.memento.crashes), len(self.memento.pending_tests), self.memento.cycle_count, self.memento.remaining_test_count))
-            print(self.memento.current_test_case.testcase)
-            print(self.memento.coverage_set_hits)
+            #print(self.memento.current_test_case.testcase)
+            #print(self.memento.coverage_set_hits)
         self.state = self.state.internal_step()
 
+
+def next_pow2(x):
+    x -= 1
+    x |= (x >> 1)
+    x |= (x >> 2)
+    x |= (x >> 4)
+    x |= (x >> 16)
+    x += 1
+    return x
+
+
+class CoroMinimizer:
+    def __init__(self, afl_fuzzer: AflFuzzer):
+        self._afl_fuzzer = afl_fuzzer
+        self._pending_iterator = iter(self._afl_fuzzer.memento.pending_tests)
+        _, self._current_test = next(self._pending_iterator)
+        self._orig_cov = None
+        self._trim_gen = None
+        self._state_gen = None
+
+    def name(self):
+        return "minimize"
+
+    def _trim(self, orig_test):
+        """
+        Generates test results via trimming.
+        """
+        new_test = bytearray(orig_test)
+        remove_len = max(next_pow2(len(new_test)) // 16, 4)
+        while remove_len >= max(next_pow2(len(new_test)) // 1024, 4):
+            remove_pos = remove_len
+            while remove_pos < len(new_test):
+                trim_amt = min(remove_len, len(new_test) - remove_pos)
+                new_test = new_test[:remove_pos] + new_test[remove_pos + trim_amt:]
+                remove_pos += remove_len
+                test_result = self._afl_fuzzer.run_test(new_test)
+                yield test_result
+            remove_len >>= 1
+
+    def _next_state(self):
+
+        for index, (parent, pending) in enumerate(self._afl_fuzzer.memento.pending_tests):
+            orig_result = self._afl_fuzzer.run_test(pending)
+
+            last_unchanged_test = pending
+            for tr in self._trim(pending):
+                if orig_result.coverage != tr.coverage:
+                    # coverage has changed, bail out
+                    break
+                else:
+                    last_unchanged_test = tr.test
+
+                yield self
+
+            self._afl_fuzzer.memento.pending_tests[index] = (parent, last_unchanged_test)
+
+    def internal_step(self):
+        if not self._state_gen:
+            self._state_gen = self._next_state()
+
+        try:
+            return next(self._state_gen)
+        except StopIteration:
+            return CalibratingState(self._afl_fuzzer)
+
+
+
+
+if __name__ == "__main__":
+    import qemu_afl
+    target = qemu_afl.AflForkServerTarget("./qemu/build/qemu-x86_64 ./fuzzme /tmp/payload")
+
+    orig_test = b"A" * 8192
+
+    for x in minimize(target, orig_test):
+        print(x)
