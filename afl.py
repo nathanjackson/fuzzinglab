@@ -68,6 +68,14 @@ class DeleteMutator:
             test.clear()
             test += new
 
+class CopyMutator:
+    def __call__(self, test: bytearray):
+        index = random.randrange(len(test))
+        size = random.randrange( max(2, (len(test) - index) // 4 ))
+        value = test[index]
+        for b in [value for _ in range(size)]:
+            test.insert(index, b)
+
 class HavocMutator:
     def __init__(self):
         self._mutators = [
@@ -90,6 +98,7 @@ class HavocMutator:
         self._mutators = self._mutators * 4
         self._mutators.append(InsertMutator())
         self._mutators.append(DeleteMutator())
+        self._mutators.append(CopyMutator())
 
     def __call__(self, test):
         n = 1 << 1 + random.randint(0, 7)
